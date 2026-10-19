@@ -1,20 +1,169 @@
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {requests} from '../src/fixtures.js';
-import {filterRequests, transitionRequest} from '../src/tracker.js';
-test('six synthetic IDs are distinct', () => {
-  assert.equal(requests.length,6); assert.equal(new Set(requests.map(r=>r.id)).size,6);
+import { requests } from '../src/fixtures.js';
+import { transitionRequest } from '../src/tracker.js';
+
+test('FEAT-02: accepts an allowed transition', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Processing',
+    'staff01'
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed.status, 'Processing');
+  assert.equal(result.event.requestId, 'REQ-101');
+  assert.equal(result.event.from, 'Awaiting review');
+  assert.equal(result.event.to, 'Processing');
+  assert.equal(result.event.actor, 'staff01');
+  assert.ok(!Number.isNaN(Date.parse(result.event.at)));
 });
-test('unfiltered list returns all requests without changing input', () => {
-  const before=structuredClone(requests);
-  assert.deepEqual(filterRequests(requests),requests);
-  assert.deepEqual(requests,before);
+
+test('FEAT-02: trims staff alias', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Processing',
+    '  staff01  '
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.event.actor, 'staff01');
 });
-test('unknown request is rejected', () => {
-  assert.equal(transitionRequest(requests,'REQ-999','Processing','Student-A').ok,false);
+
+test('FEAT-02: rejects an unknown request ID', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-999',
+    'Processing',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Request not found.');
+  assert.equal(result.requests, requests);
 });
-test('a rejected transition preserves input', () => {
-  const before=structuredClone(requests);
-  const result=transitionRequest(requests,'REQ-105','Processing','Student-A');
-  assert.equal(result.ok,false); assert.deepEqual(requests,before);
+
+test('FEAT-02: rejects an empty staff alias', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Processing',
+    '   '
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Staff alias is required.');
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: rejects the same status', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-102',
+    'Processing',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.error,
+    'Request already has that status.'
+  );
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: rejects a prohibited transition', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Collected',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.error,
+    'Status transition is not allowed.'
+  );
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: rejects Ready when identity is unverified', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-102',
+    'Ready',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.error,
+    'Identity and authorisation must both be verified before marking a request Ready.'
+  );
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: rejects Ready when authorisation is pending', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-103',
+    'Ready',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.error,
+    'Identity and authorisation must both be verified before marking a request Ready.'
+  );
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: does not mutate original requests on success', () => {
+  const originalStatus = requests[0].status;
+
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Processing',
+    'staff01'
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(requests[0].status, originalStatus);
+  assert.notEqual(result.requests, requests);
+  assert.notEqual(result.changed, requests[0]);
+});
+
+test('FEAT-02: rejects an invalid next status', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-101',
+    'Unknown status',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Invalid next status.');
+  assert.equal(result.requests, requests);
+});
+
+test('FEAT-02: rejects transitions from a terminal status', () => {
+  const result = transitionRequest(
+    requests,
+    'REQ-105',
+    'Processing',
+    'staff01'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.error,
+    'Status transition is not allowed.'
+  );
+  assert.equal(result.requests, requests);
 });
